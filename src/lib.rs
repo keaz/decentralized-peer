@@ -3,6 +3,7 @@ pub mod peer_server;
 pub mod peer_client;
 pub mod peer;
 pub mod file_check;
+pub mod rendezvous_client;
 
 
 use std::{future::Future, sync::Arc, collections::{HashMap, hash_map::Entry}};
@@ -101,7 +102,7 @@ pub async fn broker_loop(events: Receiver<Message>) -> Result<()> {
 fn handle_peer_leave(peers: &mut HashMap<String, Peer>, client_id: String, id: &Uuid) {
     match peers.remove(&client_id) {
         None => {
-            warn!("Client already left id::{} client_id::{}", id, client_id)
+            warn!("Client already left id::{} client_id::{}", id, client_id);
         }
         Some(peer) => {
             info!("Client is leaving client_id::{}", peer.peer_id);

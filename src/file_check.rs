@@ -18,7 +18,7 @@ pub async fn async_watch(path: &Path,mut sender: Sender<Message>) -> Result<()> 
     
     while let Some(res) = rx.next().await {
         match res {
-            Ok(event) => handle_evet(event,&mut sender, path).await?,
+            Ok(event) => handle_event(event,&mut sender, path).await?,
             Err(e) => handle_error(e).await,
         }
     }
@@ -39,7 +39,7 @@ fn async_watcher() -> notify::Result<(RecommendedWatcher, Receiver<notify::Resul
 }
 
 
-async fn handle_evet(event: Event,sender: &mut Sender<Message>, absolute_root: &Path) -> Result<()> {
+async fn handle_event(event: Event,sender: &mut Sender<Message>, absolute_root: &Path) -> Result<()> {
     match event.kind {
         notify::EventKind::Create(kind) => {
             match kind {
@@ -83,3 +83,8 @@ fn get_relative_path<'a>(root: &Path, path : &'a Path) -> &'a Path{
 async fn handle_error(error: Error) {
     error!("watch error: {:?}", error);
 }
+
+
+
+
+
