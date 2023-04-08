@@ -80,7 +80,7 @@ pub async fn broker_loop(events: Receiver<Message>) -> Result<()> {
                 peers.values().for_each(|peer| {
                     let command = PeerMessage::PeerCommand { command: Command::CreateNewFile { id, file_path: file.clone(), peer_id: peer.peer_id.clone() } };
                     let command_json = serde_json::to_string(&command).unwrap();
-                    task::block_on(send_message(peer.stream.clone(), command_json));
+                    task::block_on(send_message(peer.stream.clone(), command_json)); // Should change to await.
                 });
                 
             },
@@ -88,7 +88,7 @@ pub async fn broker_loop(events: Receiver<Message>) -> Result<()> {
                 peers.values().for_each(|peer| {
                     let command = PeerMessage::PeerCommand { command: Command::CreateFolder { id, folder_path: folder.clone(), peer_id: peer.peer_id.clone() } };
                     let command_json = serde_json::to_string(&command).unwrap();
-                    task::block_on(send_message(peer.stream.clone(), command_json));
+                    task::block_on(send_message(peer.stream.clone(), command_json)); // Should change to await.
                 });
             },
         }
@@ -157,4 +157,15 @@ async fn handle_event(event: Event,  broker: &mut Sender<Message>) -> Result<()>
     }
 
     Ok(())
+}
+
+pub fn get_available_port() -> Option<u16> {
+    (8000..9000).find(|port| port_is_available(*port))
+}
+
+fn port_is_available(port: u16) -> bool {
+    match std::net::TcpListener::bind(("127.0.0.1", port)) {
+        Ok(_) => true,
+        Err(_) => false,
+    }
 }

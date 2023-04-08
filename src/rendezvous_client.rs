@@ -46,9 +46,9 @@ pub struct ConnectedPeer{
     pub port: i32,
 }
 
-pub async fn server_connection_loop(addr: impl ToSocketAddrs, client_id: &String, mut broker_sender: Sender<Message>) -> Result<()> {
+pub async fn server_connection_loop(addr: impl ToSocketAddrs, client_id: &String, mut broker_sender: Sender<Message>, available_port: i32) -> Result<()> {
     let stream = TcpStream::connect(addr).await?;
-    let join_client_command = ClientCommand::ConnectClient { id: Uuid::new_v4().to_string(), client_id: client_id.clone(), port: 7890 };
+    let join_client_command = ClientCommand::ConnectClient { id: Uuid::new_v4().to_string(), client_id: client_id.clone(), port: available_port };
     let event_json = serde_json::to_string(&join_client_command)?;
 
     let (reader, mut writer) = (&stream, &stream); 

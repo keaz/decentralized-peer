@@ -1,26 +1,29 @@
 use std::{env, path::Path, time::{SystemTime, UNIX_EPOCH}};
 
 use async_std::task;
-use decen_peer::{peer_server::accept_loop, broker_loop, file_check::async_watch, rendezvous_client::server_connection_loop};
+use decen_peer::{peer_server::accept_loop, broker_loop, file_check::async_watch, rendezvous_client::server_connection_loop, get_available_port};
 use futures::channel::mpsc;
 
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    
     log4rs::init_file("config/log4rs.yaml", Default::default()).unwrap();
     
     let (broker_sender, broker_receiver) = mpsc::unbounded();
+
+    let available_port = match get_available_port() {
+        Some(available_port) => available_port,
+        None => 9000,
+    };
+
     
     let peer_id = peer_id();
-    let rendezvous_server_connection_hander =  server_connection_loop("127.0.0.1:8080",&peer_id,broker_sender.clone());
+    let rendezvous_server_connection_hander =  server_connection_loop("127.0.0.1:8080",&peer_id,broker_sender.clone(),available_port.into());
 
-    let server_handler = match args.get(1) {
-        Some(addr) => accept_loop(addr.as_str(),broker_sender.clone()),
-        None => accept_loop("127.0.0.1:8081",broker_sender.clone()),
-    }; 
+    let accept_address = format!("127.0.0.1:{}",available_port);
+    let server_handler = accept_loop(accept_address.as_str(),broker_sender.clone());
 
-    let file_watch_handler = match args.get(3) {
+    let file_watch_handler = match args.get(1) {
         Some(path) => {
             let path  = Path::new(path);
             async_watch(path,broker_sender.clone())
