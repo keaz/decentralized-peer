@@ -1,3 +1,4 @@
+pub mod file_handler;
 use std::path::Path;
 
 use log::{error, info, warn};
@@ -58,10 +59,29 @@ async fn handle_event(event: Event,sender: &mut Sender<Message>, absolute_root: 
             }
         },
         notify::EventKind::Modify(kind) => {
-            info!("Modify event for file {:?} kind :: {:?}",event.paths,kind);
+            match kind {
+                notify::event::ModifyKind::Data(data) => {
+                    let relative_path = get_relative_path(absolute_root,event.paths.get(0).unwrap()).to_str().unwrap();
+                    let message = Message::FileCreated { id: Uuid::new_v4(), file: String::from(relative_path) };
+                    sender.send(message).await?;
+                },
+                notify::event::ModifyKind::Name(name) => {
+                    let relative_path = get_relative_path(absolute_root,event.paths.get(0).unwrap()).to_str().unwrap();
+                    let message = Message::FolderCreated { id: Uuid::new_v4(), folder: String::from(relative_path) };
+                    sender.send(message).await?;
+                },
+                notify::event::ModifyKind::Other | notify::event::ModifyKind::Any => todo!(),
+                notify::event::ModifyKind::Metadata(metadata) => todo!(),
+            }
         },
         notify::EventKind::Remove(kind) => {
-            info!("Remove event for file {:?} kind :: {:?}",event.paths,kind);
+            match kind {
+                notify::event::RemoveKind::File => todo!(),
+                notify::event::RemoveKind::Folder => todo!(),
+                notify::event::RemoveKind::Any | notify::event::RemoveKind::Other => {
+                    info!("Remove event for file {:?} kind :: {:?}",event.paths,kind);
+                },
+            }
         },
         notify::EventKind::Other => {
             warn!("Other event {:?}",event);

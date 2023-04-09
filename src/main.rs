@@ -1,7 +1,7 @@
 use std::{env, path::Path, time::{SystemTime, UNIX_EPOCH}};
 
 use async_std::task;
-use decen_peer::{peer_server::accept_loop, broker_loop, file_check::async_watch, rendezvous_client::server_connection_loop, get_available_port};
+use decen_peer::{peer_server::accept_loop, broker_loop, peer_file::async_watch, rendezvous_client::server_connection_loop, get_available_port};
 use futures::channel::mpsc;
 
 

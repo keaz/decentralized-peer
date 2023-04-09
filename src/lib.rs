@@ -2,7 +2,7 @@ pub mod core;
 pub mod peer_server;
 pub mod peer_client;
 pub mod peer;
-pub mod file_check;
+pub mod peer_file;
 pub mod rendezvous_client;
 
 
@@ -39,7 +39,32 @@ pub enum Message {
         id: Uuid,
         folder: String
     },
-
+    RenamedFolder {
+        id: Uuid,
+        folder: String,
+        new_folder: String,
+    },
+    RenamedFile {
+        id: Uuid,
+        file: String,
+        new_file: String,
+    },
+    ModifyFolder {
+        id: Uuid,
+        folder: String
+    },
+    ModifyFile {
+        id: Uuid,
+        file: String
+    },
+    RemoveFolder {
+        id: Uuid,
+        folder: String
+    },
+    RemoveFile {
+        id: Uuid,
+        file: String
+    },
 }
 
 pub fn spawn_and_log_error<F>(fut: F) -> task::JoinHandle<()> where F: Future<Output = Result<()>> + Send + 'static,{
@@ -80,7 +105,7 @@ pub async fn broker_loop(events: Receiver<Message>) -> Result<()> {
                 peers.values().for_each(|peer| {
                     let command = PeerMessage::PeerCommand { command: Command::CreateNewFile { id, file_path: file.clone(), peer_id: peer.peer_id.clone() } };
                     let command_json = serde_json::to_string(&command).unwrap();
-                    task::block_on(send_message(peer.stream.clone(), command_json)); // Should change to await.
+                    task::block_on(send_message(peer.stream.clone(), command_json));
                 });
                 
             },
@@ -88,9 +113,15 @@ pub async fn broker_loop(events: Receiver<Message>) -> Result<()> {
                 peers.values().for_each(|peer| {
                     let command = PeerMessage::PeerCommand { command: Command::CreateFolder { id, folder_path: folder.clone(), peer_id: peer.peer_id.clone() } };
                     let command_json = serde_json::to_string(&command).unwrap();
-                    task::block_on(send_message(peer.stream.clone(), command_json)); // Should change to await.
+                    task::block_on(send_message(peer.stream.clone(), command_json));
                 });
             },
+            Message::RenamedFolder { id, folder, new_folder } => todo!(),
+            Message::RenamedFile { id, file, new_file } => todo!(),
+            Message::ModifyFolder { id, folder } => todo!(),
+            Message::ModifyFile { id, file } => todo!(),
+            Message::RemoveFolder { id, folder } => todo!(),
+            Message::RemoveFile { id, file } => todo!(),
         }
     }
     drop(peers); 
@@ -169,3 +200,4 @@ fn port_is_available(port: u16) -> bool {
         Err(_) => false,
     }
 }
+
