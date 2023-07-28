@@ -1,3 +1,5 @@
+pub mod client;
+
 use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use async_std::net::TcpStream;

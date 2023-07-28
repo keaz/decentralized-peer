@@ -1,18 +1,19 @@
 pub mod core;
-pub mod peer_server;
-pub mod peer_client;
+pub mod server;
 pub mod peer;
-pub mod peer_file;
-pub mod rendezvous_client;
+pub mod io;
+pub mod rendezvous;
+pub mod cmd;
 
 
 use std::{future::Future, sync::Arc, collections::{HashMap, hash_map::Entry}};
 use futures::{channel::mpsc, select, FutureExt, SinkExt};
 use async_std::{task, net::TcpStream, prelude::*,};
-use log::{warn, info};
+use log::{warn, info, debug};
 use uuid::Uuid;
 
 use crate::peer::{Peer, PeerMessage, Command, Event};
+use crate::io::file_handler::{create_file};
 
 pub type Sender<T> = mpsc::UnboundedSender<T>;
 pub type Receiver<T> = mpsc::UnboundedReceiver<T>;
@@ -33,29 +34,35 @@ pub enum Message {
     },
     FileCreated {
         id: Uuid,
-        file: String
+        file: String,
+        sha: String,
     },
     FolderCreated {
         id: Uuid,
-        folder: String
+        folder: String,
+        sha: String,
     },
-    RenamedFolder {
+    FolderRenamed {
         id: Uuid,
         folder: String,
-        new_folder: String,
+        new_name: String,
+        sha: String,
     },
-    RenamedFile {
+    FileRenamed {
         id: Uuid,
         file: String,
-        new_file: String,
+        new_name: String,
+        sha: String,
     },
     ModifyFolder {
         id: Uuid,
-        folder: String
+        folder: String,
+        sha: String,
     },
     ModifyFile {
         id: Uuid,
-        file: String
+        file: String,
+        sha: String,
     },
     RemoveFolder {
         id: Uuid,
@@ -100,8 +107,8 @@ pub async fn broker_loop(events: Receiver<Message>) -> Result<()> {
                     entry.insert(Peer {peer_id: client_id.clone(),address,port, stream: stream.clone(),});
                 }
             },
-            Message::FileCreated { id, file } => {
-                info!("Recevied File {:?}  event id {:?} ",file, id);
+            Message::FileCreated { id, file, sha } => {
+                debug!("Recevied FileCreated {:?}  event id {:?}, sha {:?}",file, id, sha);
                 peers.values().for_each(|peer| {
                     let command = PeerMessage::PeerCommand { command: Command::CreateNewFile { id, file_path: file.clone(), peer_id: peer.peer_id.clone() } };
                     let command_json = serde_json::to_string(&command).unwrap();
@@ -109,19 +116,32 @@ pub async fn broker_loop(events: Receiver<Message>) -> Result<()> {
                 });
                 
             },
-            Message::FolderCreated { id, folder } => {
+            Message::FolderCreated { id, folder ,sha } => {
+                debug!("Recevied FolderCreated {:?}  event id {:?}, sha {:?} ",folder, id, sha);
                 peers.values().for_each(|peer| {
                     let command = PeerMessage::PeerCommand { command: Command::CreateFolder { id, folder_path: folder.clone(), peer_id: peer.peer_id.clone() } };
                     let command_json = serde_json::to_string(&command).unwrap();
                     task::block_on(send_message(peer.stream.clone(), command_json));
                 });
             },
-            Message::RenamedFolder { id, folder, new_folder } => todo!(),
-            Message::RenamedFile { id, file, new_file } => todo!(),
-            Message::ModifyFolder { id, folder } => todo!(),
-            Message::ModifyFile { id, file } => todo!(),
-            Message::RemoveFolder { id, folder } => todo!(),
-            Message::RemoveFile { id, file } => todo!(),
+            Message::FolderRenamed { id, folder, new_name ,sha} => {
+                debug!("Recevied RenamedFolder {:?}  event id {:?} ",folder, id);
+            },
+            Message::FileRenamed { id, file, new_name, sha } => {
+                debug!("Recevied RenamedFile {:?}  event id {:?} ",file, id);
+            },
+            Message::ModifyFolder { id, folder, sha } => {
+                debug!("Recevied ModifyFolder {:?}  event id {:?} ",folder, id);
+            },
+            Message::ModifyFile { id, file, sha } => {
+                debug!("Recevied ModifyFile {:?}  event id {:?} ",file, id);
+            },
+            Message::RemoveFolder { id, folder } => {
+                debug!("Recevied RemoveFolder {:?}  event id {:?} ",folder, id);
+            },
+            Message::RemoveFile { id, file } => {
+                debug!("Recevied RemoveFile {:?}  event id {:?} ",file, id);
+            },
         }
     }
     drop(peers); 

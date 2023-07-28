@@ -1,11 +1,11 @@
-pub mod file_handler;
+
 use std::path::Path;
 
-use log::{error, info, warn};
+use log::{error, info, warn, debug};
 use notify::{Watcher, RecommendedWatcher, RecursiveMode,Event,Error, Config};
 use uuid::Uuid;
 
-use crate::{Sender, Message,Result};
+use crate::{Sender, Message,Result, io::sha};
 use futures::{
     channel::mpsc::{channel, Receiver},
     SinkExt, StreamExt,
@@ -41,17 +41,29 @@ fn async_watcher() -> notify::Result<(RecommendedWatcher, Receiver<notify::Resul
 
 
 async fn handle_event(event: Event,sender: &mut Sender<Message>, absolute_root: &Path) -> Result<()> {
+    let event_id = Uuid::new_v4();
+    debug!("{:?} :: Event : {:?}",event_id, event);
+    debug!("{:?} :: Create event for file {:?} kind :: {:?}",event_id,event.paths,event.kind);
+    let path = event.paths.get(0).unwrap();
+    if !path.exists() {
+        return Ok(())
+    }
+    let asyn_buf = async_std::path::PathBuf::from(path);
+    let sha = sha(&asyn_buf).await.unwrap();
+
     match event.kind {
         notify::EventKind::Create(kind) => {
             match kind {
                 notify::event::CreateKind::File => {
-                    let relative_path = get_relative_path(absolute_root,event.paths.get(0).unwrap()).to_str().unwrap();
-                    let message = Message::FileCreated { id: Uuid::new_v4(), file: String::from(relative_path) };
+                    let path = event.paths.get(0).unwrap();
+                    
+                    let relative_path = get_relative_path(absolute_root,path).to_str().unwrap();
+                    let message = Message::FileCreated { id: event_id, file: String::from(relative_path), sha };
                     sender.send(message).await?;
                 },
                 notify::event::CreateKind::Folder => {
                     let relative_path = get_relative_path(absolute_root,event.paths.get(0).unwrap()).to_str().unwrap();
-                    let message = Message::FolderCreated { id: Uuid::new_v4(), folder: String::from(relative_path) };
+                    let message = Message::FolderCreated { id: event_id, folder: String::from(relative_path), sha };
                     sender.send(message).await?;
                 },
                 notify::event::CreateKind::Other => todo!(),
@@ -62,13 +74,14 @@ async fn handle_event(event: Event,sender: &mut Sender<Message>, absolute_root: 
             match kind {
                 notify::event::ModifyKind::Data(data) => {
                     let relative_path = get_relative_path(absolute_root,event.paths.get(0).unwrap()).to_str().unwrap();
-                    let message = Message::FileCreated { id: Uuid::new_v4(), file: String::from(relative_path) };
+                    let message = Message::FileCreated { id: event_id, file: String::from(relative_path), sha };
                     sender.send(message).await?;
                 },
                 notify::event::ModifyKind::Name(name) => {
+                    let path = event.paths.get(0).unwrap();
+                    
                     let relative_path = get_relative_path(absolute_root,event.paths.get(0).unwrap()).to_str().unwrap();
-                    let message = Message::FolderCreated { id: Uuid::new_v4(), folder: String::from(relative_path) };
-                    sender.send(message).await?;
+                    
                 },
                 notify::event::ModifyKind::Other | notify::event::ModifyKind::Any => todo!(),
                 notify::event::ModifyKind::Metadata(metadata) => todo!(),

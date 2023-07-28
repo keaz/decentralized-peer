@@ -1,14 +1,16 @@
 use std::{env, path::Path, time::{SystemTime, UNIX_EPOCH}};
 
 use async_std::task;
-use decen_peer::{peer_server::accept_loop, broker_loop, peer_file::async_watch, rendezvous_client::server_connection_loop, get_available_port};
+use clap::Parser;
+use decen_peer::{server::accept_loop, broker_loop, io::watch::async_watch, rendezvous::server_connection_loop, get_available_port, cmd::CmdArgs};
 use futures::channel::mpsc;
+use rsa::{Pkcs1v15Encrypt, PublicKey, RsaPrivateKey, RsaPublicKey};
 
 
 fn main() {
     let args: Vec<String> = env::args().collect();
     log4rs::init_file("config/log4rs.yaml", Default::default()).unwrap();
-    
+    let cmds = CmdArgs::parse_from(env::args_os());
     let (broker_sender, broker_receiver) = mpsc::unbounded();
 
     let available_port = match get_available_port() {
@@ -22,17 +24,9 @@ fn main() {
 
     let accept_address = format!("127.0.0.1:{}",available_port);
     let server_handler = accept_loop(accept_address.as_str(),broker_sender.clone());
-
-    let file_watch_handler = match args.get(1) {
-        Some(path) => {
-            let path  = Path::new(path);
-            async_watch(path,broker_sender.clone())
-        },
-        None => {
-            let path  = Path::new("/Users/kasunranasinghe/Development/RUST/test");
-            async_watch(path,broker_sender.clone())
-        },
-    } ;
+    let folder = cmds.folder;
+    let path  = Path::new(folder.as_str());
+    let file_watch_handler = async_watch(path,broker_sender.clone());
 
     let broker_handle = broker_loop(broker_receiver);
     let joined_futures = futures::future::join4(rendezvous_server_connection_hander,server_handler,broker_handle,file_watch_handler);

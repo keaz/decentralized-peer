@@ -10,7 +10,7 @@ use log::{debug, info, warn};
 use uuid::Uuid;
 use serde::{Deserialize, Serialize};
 
-use crate::{Sender,Result, Message, peer_client::client_connection, spawn_and_log_error};
+use crate::{Sender,Result, Message, peer::client::client_connection, spawn_and_log_error};
 
 #[derive(Serialize, Deserialize)]
 pub enum ClientCommand {
