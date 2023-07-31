@@ -27,6 +27,7 @@ pub enum Command {
         id: Uuid,
         peer_id: String,
         file_path: String,
+        sha: String,
     },
     CreateFolder {
         id: Uuid,

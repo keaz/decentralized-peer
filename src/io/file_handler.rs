@@ -1,12 +1,12 @@
 use std::io::SeekFrom;
 
-use crate::Result;
+use crate::{Result, io::sha256_digest};
 use async_std::{
     fs::File,
     io::{prelude::SeekExt, ReadExt, WriteExt},
     path::Path,
 };
-use log::info;
+use log::{info, debug};
 
 #[derive(Debug)]
 pub struct FileHandler {
@@ -26,10 +26,20 @@ impl FileHandler {
     /// * `root_folder` - The root folder where the file will be created
     /// * `file_name` - The relative path to the root folder and name of the file to be created
     ///
-    pub async fn create_file(&self, file_name: String) -> Result<()> {
+    pub async fn create_file(&self, file_name: String, sha: String) -> Result<()> {
         let path = Path::new(&self.root).join(file_name);
-        let _file = File::create(path).await?;
-
+        if path.exists().await {
+            let asyn_buf = async_std::path::PathBuf::from(path.clone());
+            let existing_sha = crate::io::sha(&asyn_buf).await;
+            if let Some(existing_sha) =  existing_sha {
+                if existing_sha.eq(&sha) {
+                    debug!("File alaready exisits in with the same SHA {:?}",sha);
+                    return Ok(())
+                }
+            }
+        }
+        let new_file = File::create(path).await?;
+        debug!("New file created {:?}",new_file);
         Ok(())
     }
 

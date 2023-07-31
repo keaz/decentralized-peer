@@ -128,6 +128,7 @@ pub async fn broker_loop(events: Receiver<Message>) -> Result<()> {
                             id,
                             file_path: file.clone(),
                             peer_id: peer.peer_id.clone(),
+                            sha: sha.clone(),
                         },
                     };
                     let command_json = serde_json::to_string(&command).unwrap();
@@ -245,12 +246,13 @@ impl PeerMessageHandler {
                 id,
                 file_path,
                 peer_id,
+                sha,
             } => {
                 info!(
                     "id :: {} Recevied CreateNewFile command for {} file from {}",
                     id, file_path, peer_id
                 );
-                //create a empty file and request data
+                self.file_handler.create_file(file_path,sha).await.unwrap();
             }
             Command::CreateFolder {
                 id,
