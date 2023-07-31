@@ -7,11 +7,7 @@ pub struct CmdArgs {
     /// Root folder to search duplicate
     #[arg(short, long, default_value_t = String::from("/Users/kasunranasinghe/Development/RUST/test"))]
     pub folder: String,
-
 }
 
 #[cfg(test)]
-mod tests {
-
-    
-}
+mod tests {}

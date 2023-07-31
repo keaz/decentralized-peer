@@ -1,25 +1,23 @@
-
 use std::path::Path;
 
-use log::{error, info, warn, debug};
-use notify::{Watcher, RecommendedWatcher, RecursiveMode,Event,Error, Config};
+use log::{debug, error, info, warn};
+use notify::{Config, Error, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use uuid::Uuid;
 
-use crate::{Sender, Message,Result, io::sha};
+use crate::{io::sha, Message, Result, Sender};
 use futures::{
     channel::mpsc::{channel, Receiver},
     SinkExt, StreamExt,
 };
 
-
-pub async fn async_watch(path: &Path,mut sender: Sender<Message>) -> Result<()> {
+pub async fn async_watch(path: &Path, mut sender: Sender<Message>) -> Result<()> {
     let (mut watcher, mut rx) = async_watcher()?;
 
     watcher.watch(path, RecursiveMode::Recursive)?;
-    
+
     while let Some(res) = rx.next().await {
         match res {
-            Ok(event) => handle_event(event,&mut sender, path).await?,
+            Ok(event) => handle_event(event, &mut sender, path).await?,
             Err(e) => handle_error(e).await,
         }
     }
@@ -30,94 +28,109 @@ pub async fn async_watch(path: &Path,mut sender: Sender<Message>) -> Result<()> 
 fn async_watcher() -> notify::Result<(RecommendedWatcher, Receiver<notify::Result<Event>>)> {
     let (mut tx, rx) = channel(1);
 
-    let watcher = RecommendedWatcher::new(move |res| {
-        futures::executor::block_on(async {
-            tx.send(res).await.unwrap();
-        })
-    }, Config::default())?;
+    let watcher = RecommendedWatcher::new(
+        move |res| {
+            futures::executor::block_on(async {
+                tx.send(res).await.unwrap();
+            })
+        },
+        Config::default(),
+    )?;
 
     Ok((watcher, rx))
 }
 
-
-async fn handle_event(event: Event,sender: &mut Sender<Message>, absolute_root: &Path) -> Result<()> {
+async fn handle_event(
+    event: Event,
+    sender: &mut Sender<Message>,
+    absolute_root: &Path,
+) -> Result<()> {
     let event_id = Uuid::new_v4();
-    debug!("{:?} :: Event : {:?}",event_id, event);
-    debug!("{:?} :: Create event for file {:?} kind :: {:?}",event_id,event.paths,event.kind);
+    debug!("{:?} :: Event : {:?}", event_id, event);
+    debug!(
+        "{:?} :: Create event for file {:?} kind :: {:?}",
+        event_id, event.paths, event.kind
+    );
     let path = event.paths.get(0).unwrap();
     if !path.exists() {
-        return Ok(())
+        debug!("{:?} File {:?} already deleted ", event_id, path);
+        return Ok(());
     }
     let asyn_buf = async_std::path::PathBuf::from(path);
     let sha = sha(&asyn_buf).await.unwrap();
 
     match event.kind {
-        notify::EventKind::Create(kind) => {
-            match kind {
-                notify::event::CreateKind::File => {
-                    let path = event.paths.get(0).unwrap();
-                    
-                    let relative_path = get_relative_path(absolute_root,path).to_str().unwrap();
-                    let message = Message::FileCreated { id: event_id, file: String::from(relative_path), sha };
-                    sender.send(message).await?;
-                },
-                notify::event::CreateKind::Folder => {
-                    let relative_path = get_relative_path(absolute_root,event.paths.get(0).unwrap()).to_str().unwrap();
-                    let message = Message::FolderCreated { id: event_id, folder: String::from(relative_path), sha };
-                    sender.send(message).await?;
-                },
-                notify::event::CreateKind::Other => todo!(),
-                notify::event::CreateKind::Any => todo!(),
+        notify::EventKind::Create(kind) => match kind {
+            notify::event::CreateKind::File => {
+                let path = event.paths.get(0).unwrap();
+
+                let relative_path = get_relative_path(absolute_root, path).to_str().unwrap();
+                let message = Message::FileCreated {
+                    id: event_id,
+                    file: String::from(relative_path),
+                    sha,
+                };
+                sender.send(message).await?;
             }
-        },
-        notify::EventKind::Modify(kind) => {
-            match kind {
-                notify::event::ModifyKind::Data(data) => {
-                    let relative_path = get_relative_path(absolute_root,event.paths.get(0).unwrap()).to_str().unwrap();
-                    let message = Message::FileCreated { id: event_id, file: String::from(relative_path), sha };
-                    sender.send(message).await?;
-                },
-                notify::event::ModifyKind::Name(name) => {
-                    let path = event.paths.get(0).unwrap();
-                    
-                    let relative_path = get_relative_path(absolute_root,event.paths.get(0).unwrap()).to_str().unwrap();
-                    
-                },
-                notify::event::ModifyKind::Other | notify::event::ModifyKind::Any => todo!(),
-                notify::event::ModifyKind::Metadata(metadata) => todo!(),
+            notify::event::CreateKind::Folder => {
+                let relative_path = get_relative_path(absolute_root, event.paths.get(0).unwrap())
+                    .to_str()
+                    .unwrap();
+                let message = Message::FolderCreated {
+                    id: event_id,
+                    folder: String::from(relative_path),
+                    sha,
+                };
+                sender.send(message).await?;
             }
+            notify::event::CreateKind::Other => todo!(),
+            notify::event::CreateKind::Any => todo!(),
         },
-        notify::EventKind::Remove(kind) => {
-            match kind {
-                notify::event::RemoveKind::File => todo!(),
-                notify::event::RemoveKind::Folder => todo!(),
-                notify::event::RemoveKind::Any | notify::event::RemoveKind::Other => {
-                    info!("Remove event for file {:?} kind :: {:?}",event.paths,kind);
-                },
+        notify::EventKind::Modify(kind) => match kind {
+            notify::event::ModifyKind::Data(data) => {
+                let relative_path = get_relative_path(absolute_root, event.paths.get(0).unwrap())
+                    .to_str()
+                    .unwrap();
+                let message = Message::FileModified {
+                    id: event_id,
+                    file: String::from(relative_path),
+                    sha,
+                };
+                sender.send(message).await?;
+            }
+            notify::event::ModifyKind::Name(name) => {
+                let path = event.paths.get(0).unwrap();
+                let relative_path = get_relative_path(absolute_root, event.paths.get(0).unwrap())
+                    .to_str()
+                    .unwrap();
+            }
+            notify::event::ModifyKind::Other | notify::event::ModifyKind::Any => todo!(),
+            notify::event::ModifyKind::Metadata(metadata) => todo!(),
+        },
+        notify::EventKind::Remove(kind) => match kind {
+            notify::event::RemoveKind::File => {}
+            notify::event::RemoveKind::Folder => todo!(),
+            notify::event::RemoveKind::Any | notify::event::RemoveKind::Other => {
+                info!("Remove event for file {:?} kind :: {:?}", event.paths, kind);
             }
         },
         notify::EventKind::Other => {
-            warn!("Other event {:?}",event);
-        },
+            warn!("Other event {:?}", event);
+        }
         notify::EventKind::Any => {
-            warn!("Unknown event {:?}",event);
-        },
+            warn!("Unknown event {:?}", event);
+        }
         notify::EventKind::Access(kind) => {
-            info!("Access event for file {:?} kind :: {:?}",event.paths,kind);
-        },
+            info!("Access event for file {:?} kind :: {:?}", event.paths, kind);
+        }
     }
     Ok(())
 }
 
-fn get_relative_path<'a>(root: &Path, path : &'a Path) -> &'a Path{
+fn get_relative_path<'a>(root: &Path, path: &'a Path) -> &'a Path {
     path.strip_prefix(root).unwrap()
 }
 
 async fn handle_error(error: Error) {
     error!("watch error: {:?}", error);
 }
-
-
-
-
-

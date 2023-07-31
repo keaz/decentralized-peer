@@ -1,10 +1,13 @@
-use async_std::{path::PathBuf, fs::File, io::{BufReader, ReadExt}};
+use async_std::{
+    fs::File,
+    io::{BufReader, ReadExt},
+    path::PathBuf,
+};
 use data_encoding::HEXUPPER;
-use ring::digest::{Digest, Context, SHA256};
+use ring::digest::{Context, Digest, SHA256};
 
-pub mod watch;
 pub mod file_handler;
-
+pub mod watch;
 
 async fn sha256_digest(mut reader: BufReader<File>) -> Option<Digest> {
     let mut context = Context::new(&SHA256);

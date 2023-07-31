@@ -1,19 +1,22 @@
-pub mod core;
-pub mod server;
-pub mod peer;
-pub mod io;
-pub mod rendezvous;
 pub mod cmd;
+pub mod core;
+pub mod io;
+pub mod peer;
+pub mod rendezvous;
+pub mod server;
 
-
-use std::{future::Future, sync::Arc, collections::{HashMap, hash_map::Entry}};
+use async_std::{net::TcpStream, prelude::*, task};
 use futures::{channel::mpsc, select, FutureExt, SinkExt};
-use async_std::{task, net::TcpStream, prelude::*,};
-use log::{warn, info, debug};
+use log::{debug, info, warn};
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    future::Future,
+    sync::Arc,
+};
 use uuid::Uuid;
 
-use crate::peer::{Peer, PeerMessage, Command, Event};
-use crate::io::file_handler::{create_file};
+use crate::io::file_handler::FileHandler;
+use crate::peer::{Command, Event, Peer, PeerMessage};
 
 pub type Sender<T> = mpsc::UnboundedSender<T>;
 pub type Receiver<T> = mpsc::UnboundedReceiver<T>;
@@ -42,39 +45,32 @@ pub enum Message {
         folder: String,
         sha: String,
     },
-    FolderRenamed {
-        id: Uuid,
-        folder: String,
-        new_name: String,
-        sha: String,
-    },
-    FileRenamed {
-        id: Uuid,
-        file: String,
-        new_name: String,
-        sha: String,
-    },
-    ModifyFolder {
-        id: Uuid,
-        folder: String,
-        sha: String,
-    },
-    ModifyFile {
+    FileModified {
         id: Uuid,
         file: String,
         sha: String,
     },
-    RemoveFolder {
+    FolderModified {
         id: Uuid,
-        folder: String
+        folder: String,
+        sha: String,
     },
-    RemoveFile {
+    FileDeleted {
         id: Uuid,
-        file: String
+        folder: String,
+        sha: String,
+    },
+    FolderDeleted {
+        id: Uuid,
+        file: String,
+        sha: String,
     },
 }
 
-pub fn spawn_and_log_error<F>(fut: F) -> task::JoinHandle<()> where F: Future<Output = Result<()>> + Send + 'static,{
+pub fn spawn_and_log_error<F>(fut: F) -> task::JoinHandle<()>
+where
+    F: Future<Output = Result<()>> + Send + 'static,
+{
     task::spawn(async move {
         if let Err(e) = fut.await {
             warn!("{}", e)
@@ -100,51 +96,76 @@ pub async fn broker_loop(events: Receiver<Message>) -> Result<()> {
             },
         };
         match event {
-            Message::LeavePeer { id, peer_id: client_id } => handle_peer_leave(&mut peers, client_id, &id),
-            Message::NewPeer {id: _,peer_id: client_id, address,port, stream,} => match peers.entry(client_id.clone()) {
+            Message::LeavePeer {
+                id,
+                peer_id: client_id,
+            } => handle_peer_leave(&mut peers, client_id, &id),
+            Message::NewPeer {
+                id: _,
+                peer_id: client_id,
+                address,
+                port,
+                stream,
+            } => match peers.entry(client_id.clone()) {
                 Entry::Occupied(..) => (),
                 Entry::Vacant(entry) => {
-                    entry.insert(Peer {peer_id: client_id.clone(),address,port, stream: stream.clone(),});
+                    entry.insert(Peer {
+                        peer_id: client_id.clone(),
+                        address,
+                        port,
+                        stream: stream.clone(),
+                    });
                 }
             },
             Message::FileCreated { id, file, sha } => {
-                debug!("Recevied FileCreated {:?}  event id {:?}, sha {:?}",file, id, sha);
+                debug!(
+                    "Recevied FileCreated {:?}  event id {:?}, sha {:?}",
+                    file, id, sha
+                );
                 peers.values().for_each(|peer| {
-                    let command = PeerMessage::PeerCommand { command: Command::CreateNewFile { id, file_path: file.clone(), peer_id: peer.peer_id.clone() } };
+                    let command = PeerMessage::PeerCommand {
+                        command: Command::CreateNewFile {
+                            id,
+                            file_path: file.clone(),
+                            peer_id: peer.peer_id.clone(),
+                        },
+                    };
                     let command_json = serde_json::to_string(&command).unwrap();
                     task::block_on(send_message(peer.stream.clone(), command_json));
                 });
-                
-            },
-            Message::FolderCreated { id, folder ,sha } => {
-                debug!("Recevied FolderCreated {:?}  event id {:?}, sha {:?} ",folder, id, sha);
+            }
+            Message::FolderCreated { id, folder, sha } => {
+                debug!(
+                    "Recevied FolderCreated {:?}  event id {:?}, sha {:?} ",
+                    folder, id, sha
+                );
                 peers.values().for_each(|peer| {
-                    let command = PeerMessage::PeerCommand { command: Command::CreateFolder { id, folder_path: folder.clone(), peer_id: peer.peer_id.clone() } };
+                    let command = PeerMessage::PeerCommand {
+                        command: Command::CreateFolder {
+                            id,
+                            folder_path: folder.clone(),
+                            peer_id: peer.peer_id.clone(),
+                        },
+                    };
                     let command_json = serde_json::to_string(&command).unwrap();
                     task::block_on(send_message(peer.stream.clone(), command_json));
                 });
-            },
-            Message::FolderRenamed { id, folder, new_name ,sha} => {
-                debug!("Recevied RenamedFolder {:?}  event id {:?} ",folder, id);
-            },
-            Message::FileRenamed { id, file, new_name, sha } => {
-                debug!("Recevied RenamedFile {:?}  event id {:?} ",file, id);
-            },
-            Message::ModifyFolder { id, folder, sha } => {
-                debug!("Recevied ModifyFolder {:?}  event id {:?} ",folder, id);
-            },
-            Message::ModifyFile { id, file, sha } => {
-                debug!("Recevied ModifyFile {:?}  event id {:?} ",file, id);
-            },
-            Message::RemoveFolder { id, folder } => {
-                debug!("Recevied RemoveFolder {:?}  event id {:?} ",folder, id);
-            },
-            Message::RemoveFile { id, file } => {
-                debug!("Recevied RemoveFile {:?}  event id {:?} ",file, id);
-            },
+            }
+            Message::FileModified { id, file, sha } => {
+                debug!("Recevied FileModified {:?}  event id {:?} ", file, id);
+            }
+            Message::FolderModified { id, folder, sha } => {
+                debug!("Recevied FolderModified {:?}  event id {:?} ", folder, id);
+            }
+            Message::FileDeleted { id, folder, sha } => {
+                debug!("Recevied RemoveFolder {:?}  event id {:?} ", folder, id);
+            }
+            Message::FolderDeleted { id, file, sha } => {
+                debug!("Recevied RemoveFile {:?}  event id {:?} ", file, id);
+            }
         }
     }
-    drop(peers); 
+    drop(peers);
     // drop(disconnect_sender);
     // while let Some((_name, _pending_messages)) = disconnect_receiver.next().await {}
     Ok(())
@@ -162,52 +183,102 @@ fn handle_peer_leave(peers: &mut HashMap<String, Peer>, client_id: String, id: &
     }
 }
 
-
-pub async fn handle_peer_message(line: String, broker: &mut Sender<Message>) -> Result<()> {
-
-    let message: PeerMessage = serde_json::from_str(&line)?;
-    let _result  = match message {
-        PeerMessage::PeerCommand { command } => handle_command(command, broker).await,
-        PeerMessage::PeerEvent { event } => handle_event(event, broker).await,
-    };
-
-    Ok(())
+#[derive(Debug)]
+pub struct PeerMessageHandler {
+    file_handler: FileHandler,
 }
 
-async fn handle_command(command: Command,  broker: &mut Sender<Message>) -> Result<()> {
-    match command {
-        Command::Connect { id, client_id, port } => {
-            //this should never happen, in this place
-            warn!("Peer {} Connect command, id {} ",client_id,id);
-        },
-        Command::Leave { id, client_id } => {
-            info!("Received Peer leave command id::{} client::{}",id, client_id);
+impl PeerMessageHandler {
+    
+    pub fn new(file_handler: FileHandler) -> Self {
+        PeerMessageHandler { file_handler }
+    }
+
+}
+
+impl PeerMessageHandler {
+    
+    pub async fn handle_peer_message(&self, line: String, broker: &mut Sender<Message>) -> Result<()> {
+        let message: PeerMessage = serde_json::from_str(&line)?;
+        let _result = match message {
+            PeerMessage::PeerCommand { command } => self.handle_command(command, broker).await,
+            PeerMessage::PeerEvent { event } => self.handle_event(event, broker).await,
+        };
+    
+        Ok(())
+    }
+
+    async fn handle_command(&self,command: Command, broker: &mut Sender<Message>) -> Result<()> {
+        match command {
+            Command::Connect {
+                id,
+                client_id,
+                port,
+            } => {
+                //this should never happen, in this place
+                warn!("Peer {} Connect command, id {} ", client_id, id);
+            }
+            Command::Leave { id, client_id } => {
+                info!(
+                    "Received Peer leave command id::{} client::{}",
+                    id, client_id
+                );
                 broker
-                    .send(Message::LeavePeer { id, peer_id: client_id })
+                    .send(Message::LeavePeer {
+                        id,
+                        peer_id: client_id,
+                    })
                     .await
                     .unwrap();
-        },
-        Command::Test { id, peer_id, message } => {
-            info!("Peer {} test command with message {}, id :: {}",peer_id,message,id);
-        },
-        Command::CreateNewFile { id, file_path, peer_id } => {
-            info!("id :: {} Recevied CreateNewFile command for {} file from {}",id,file_path,peer_id);
-        },
-        Command::CreateFolder { id, folder_path, peer_id } => {
-            info!("id :: {} Recevied CreateFolder command for {} file from {}",id,folder_path,peer_id);
-        },
+            }
+            Command::Test {
+                id,
+                peer_id,
+                message,
+            } => {
+                info!(
+                    "Peer {} test command with message {}, id :: {}",
+                    peer_id, message, id
+                );
+            }
+            Command::CreateNewFile {
+                id,
+                file_path,
+                peer_id,
+            } => {
+                info!(
+                    "id :: {} Recevied CreateNewFile command for {} file from {}",
+                    id, file_path, peer_id
+                );
+                //create a empty file and request data
+            }
+            Command::CreateFolder {
+                id,
+                folder_path,
+                peer_id,
+            } => {
+                info!(
+                    "id :: {} Recevied CreateFolder command for {} file from {}",
+                    id, folder_path, peer_id
+                );
+            }
+        }
+        Ok(())
     }
-    Ok(())
-}
 
-async fn handle_event(event: Event,  broker: &mut Sender<Message>) -> Result<()> {
-
-    match event {
-        Event::Connected { id, client_id, port } => todo!(),
-        Event::Left { id, client_id } => todo!(),
+    async fn handle_event(&self, event: Event, broker: &mut Sender<Message>) -> Result<()> {
+        match event {
+            Event::Connected {
+                id,
+                client_id,
+                port,
+            } => todo!(),
+            Event::Left { id, client_id } => todo!(),
+        }
+    
+        Ok(())
     }
 
-    Ok(())
 }
 
 pub fn get_available_port() -> Option<u16> {
@@ -220,4 +291,3 @@ fn port_is_available(port: u16) -> bool {
         Err(_) => false,
     }
 }
-

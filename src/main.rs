@@ -1,11 +1,17 @@
-use std::{env, path::Path, time::{SystemTime, UNIX_EPOCH}};
+use std::{
+    env,
+    path::Path,
+    time::{SystemTime, UNIX_EPOCH}, rc::Rc,
+};
 
 use async_std::task;
 use clap::Parser;
-use decen_peer::{server::accept_loop, broker_loop, io::watch::async_watch, rendezvous::server_connection_loop, get_available_port, cmd::CmdArgs};
+use decen_peer::{
+    broker_loop, cmd::CmdArgs, get_available_port, io::{watch::async_watch, file_handler::FileHandler},
+    rendezvous::Server, server::PeerServer, peer::client::ClientConnectionHandler, PeerMessageHandler,
+};
 use futures::channel::mpsc;
 use rsa::{Pkcs1v15Encrypt, PublicKey, RsaPrivateKey, RsaPublicKey};
-
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -18,25 +24,43 @@ fn main() {
         None => 9000,
     };
 
-    
-    let peer_id = peer_id();
-    let rendezvous_server_connection_hander =  server_connection_loop("127.0.0.1:8080",&peer_id,broker_sender.clone(),available_port.into());
+    let folder = cmds.folder.clone();
+    let path = Path::new(folder.as_str());
 
-    let accept_address = format!("127.0.0.1:{}",available_port);
-    let server_handler = accept_loop(accept_address.as_str(),broker_sender.clone());
-    let folder = cmds.folder;
-    let path  = Path::new(folder.as_str());
-    let file_watch_handler = async_watch(path,broker_sender.clone());
+    let file_handler = FileHandler::new(cmds.folder);
+    let peer_message_hander = Rc::new(PeerMessageHandler::new(file_handler));
+    
+    let client_handler = ClientConnectionHandler::new(peer_message_hander.clone());
+    let server = Server::new(client_handler);
+    let peer_id = peer_id();
+    let rendezvous_server_connection_hander = server.server_connection_loop(
+        "127.0.0.1:8080",
+        &peer_id,
+        broker_sender.clone(),
+        available_port.into(),
+    );
+
+    let accept_address = format!("127.0.0.1:{}", available_port);
+    let peer_server = PeerServer::new(peer_message_hander.clone());
+    let server_handler =  peer_server.accept_loop(accept_address.as_str(), broker_sender.clone());
+    
+    let file_watch_handler = async_watch(path, broker_sender.clone());
 
     let broker_handle = broker_loop(broker_receiver);
-    let joined_futures = futures::future::join4(rendezvous_server_connection_hander,server_handler,broker_handle,file_watch_handler);
+    let joined_futures = futures::future::join4(
+        rendezvous_server_connection_hander,
+        server_handler,
+        broker_handle,
+        file_watch_handler,
+    );
     let _result = task::block_on(joined_futures);
-
 }
 
 fn peer_id() -> String {
     let start = SystemTime::now();
-    let since_the_epoch = start.duration_since(UNIX_EPOCH).expect("Time went backwards");
-    let peer_id = format!("client_123_{}",since_the_epoch.subsec_millis());
+    let since_the_epoch = start
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards");
+    let peer_id = format!("client_123_{}", since_the_epoch.subsec_millis());
     peer_id
 }
