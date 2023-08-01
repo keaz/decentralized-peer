@@ -10,6 +10,9 @@ use futures::{
     SinkExt, StreamExt,
 };
 
+
+
+
 pub async fn async_watch(path: &Path, mut sender: Sender<Message>) -> Result<()> {
     let (mut watcher, mut rx) = async_watcher()?;
 
@@ -105,7 +108,9 @@ async fn handle_event(
                     .unwrap();
             }
             notify::event::ModifyKind::Other | notify::event::ModifyKind::Any => todo!(),
-            notify::event::ModifyKind::Metadata(metadata) => todo!(),
+            notify::event::ModifyKind::Metadata(metadata) => {
+                debug!("TODO ignore update for now {:?}",path);
+            },
         },
         notify::EventKind::Remove(kind) => match kind {
             notify::event::RemoveKind::File => {}

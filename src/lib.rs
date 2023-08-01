@@ -5,7 +5,7 @@ pub mod peer;
 pub mod rendezvous;
 pub mod server;
 
-use async_std::{net::TcpStream, prelude::*, task};
+use async_std::{net::TcpStream, prelude::*, task, sync::Mutex};
 use futures::{channel::mpsc, select, FutureExt, SinkExt};
 use log::{debug, info, warn};
 use std::{
@@ -65,6 +65,19 @@ pub enum Message {
         file: String,
         sha: String,
     },
+    RequestData {
+        id: Uuid,
+        file: String,
+        peer_id: String,
+        sha: String,
+    },
+    DataRead {
+        id: Uuid,
+        file: String,
+        peer_id: String,
+        offset: u64,
+        data: Vec<u8>,
+    }
 }
 
 pub fn spawn_and_log_error<F>(fut: F) -> task::JoinHandle<()>
@@ -83,8 +96,21 @@ pub async fn send_message(stream: Arc<TcpStream>, peers_json: String) {
     let _rs = (&*stream).write_all(b"\n").await;
 }
 
-//Handles only Message
-pub async fn broker_loop(events: Receiver<Message>) -> Result<()> {
+pub struct Broker {
+    my_peer_id: String,
+    files_in_update: Arc<Mutex<HashMap<String,String>>>,
+}
+
+impl Broker {
+    pub fn new(
+        my_peer_id: String,) -> Self {
+            Broker {  my_peer_id, files_in_update: Arc::new(Mutex::new(HashMap::new())) }
+    }
+}
+
+impl Broker {
+    //Handles only Message
+pub async fn broker_loop(&self, events: Receiver<Message>) -> Result<()> {
     // let (disconnect_sender, mut disconnect_receiver) = mpsc::unbounded::<(String, Receiver<PeerEvent>)>();
     let mut peers: HashMap<String, Peer> = HashMap::new();
     let mut events = events.fuse();
@@ -127,7 +153,7 @@ pub async fn broker_loop(events: Receiver<Message>) -> Result<()> {
                         command: Command::CreateNewFile {
                             id,
                             file_path: file.clone(),
-                            peer_id: peer.peer_id.clone(),
+                            peer_id: self.my_peer_id.clone(),
                             sha: sha.clone(),
                         },
                     };
@@ -145,7 +171,7 @@ pub async fn broker_loop(events: Receiver<Message>) -> Result<()> {
                         command: Command::CreateFolder {
                             id,
                             folder_path: folder.clone(),
-                            peer_id: peer.peer_id.clone(),
+                            peer_id: self.my_peer_id.clone(),
                         },
                     };
                     let command_json = serde_json::to_string(&command).unwrap();
@@ -153,7 +179,21 @@ pub async fn broker_loop(events: Receiver<Message>) -> Result<()> {
                 });
             }
             Message::FileModified { id, file, sha } => {
-                debug!("Recevied FileModified {:?}  event id {:?} ", file, id);
+                debug!(
+                    "Recevied FileModified {:?}  event id {:?}, sha {:?}",
+                    file, id, sha
+                );
+                peers.values().for_each(|peer| {
+                    let command = PeerMessage::PeerCommand {
+                        command: Command::ModifyFile  {
+                            id,
+                            file_path: file.clone(),
+                            peer_id: self.my_peer_id.clone(),
+                        },
+                    };
+                    let command_json = serde_json::to_string(&command).unwrap();
+                    task::block_on(send_message(peer.stream.clone(), command_json));
+                });
             }
             Message::FolderModified { id, folder, sha } => {
                 debug!("Recevied FolderModified {:?}  event id {:?} ", folder, id);
@@ -163,6 +203,29 @@ pub async fn broker_loop(events: Receiver<Message>) -> Result<()> {
             }
             Message::FolderDeleted { id, file, sha } => {
                 debug!("Recevied RemoveFile {:?}  event id {:?} ", file, id);
+            },
+            Message::RequestData { id, file, peer_id, sha } => {
+                peers.values().filter(|peer| peer.peer_id.eq(&peer_id)).for_each(|peer| {
+                    let command = PeerMessage::PeerCommand {
+                        command: Command::DataRequestCommand {
+                            id,
+                            peer_id: self.my_peer_id.clone(),
+                            file_path: file.clone(),
+                        },
+                    };
+                    let command_json = serde_json::to_string(&command).unwrap();
+                    task::block_on(send_message(peer.stream.clone(), command_json));
+                });
+            },
+            Message::DataRead { id, file, peer_id, offset, data } => {
+                
+                peers.values().filter(|peer| peer.peer_id.eq(&peer_id)).for_each(|peer| {
+                    let command = PeerMessage::PeerCommand {
+                        command: Command::WriteDataCommand { id, peer_id: self.my_peer_id.clone(), file_path: file.clone(), offset, data: data.clone() },
+                    };
+                    let command_json = serde_json::to_string(&command).unwrap();
+                    task::block_on(send_message(peer.stream.clone(), command_json));
+                });
             }
         }
     }
@@ -171,6 +234,9 @@ pub async fn broker_loop(events: Receiver<Message>) -> Result<()> {
     // while let Some((_name, _pending_messages)) = disconnect_receiver.next().await {}
     Ok(())
 }
+}
+
+
 
 fn handle_peer_leave(peers: &mut HashMap<String, Peer>, client_id: String, id: &Uuid) {
     match peers.remove(&client_id) {
@@ -231,7 +297,22 @@ impl PeerMessageHandler {
                     })
                     .await
                     .unwrap();
-            }
+            },
+            Command::ModifyFile { id, peer_id, file_path } => {
+                debug!("Not Implemented yet");
+            },
+            Command::DataRequestCommand { id, peer_id, file_path } => {
+                let mut buf  = vec![0; 255];
+                let mut offset = 0;
+                while !self.file_handler.read_random(&file_path, offset, &mut buf).await.unwrap() {
+                    
+                    let message = Message::DataRead { id: id.clone(), file: file_path.clone(), peer_id: peer_id.clone(), offset, data: buf.clone() };
+                    broker.send(message).await.unwrap();
+                    offset = offset + 256;
+                    buf.clear();
+                }
+
+            },
             Command::Test {
                 id,
                 peer_id,
@@ -252,7 +333,10 @@ impl PeerMessageHandler {
                     "id :: {} Recevied CreateNewFile command for {} file from {}",
                     id, file_path, peer_id
                 );
-                self.file_handler.create_file(file_path,sha).await.unwrap();
+                self.file_handler.create_file(&file_path,&sha).await.unwrap();
+                
+                let data_request = Message::RequestData { id, file: file_path, peer_id, sha};
+                broker.send(data_request).await.unwrap();
             }
             Command::CreateFolder {
                 id,
@@ -264,6 +348,13 @@ impl PeerMessageHandler {
                     id, folder_path, peer_id
                 );
             }
+            Command::WriteDataCommand { id, peer_id, file_path, offset, data } => {
+                debug!(
+                    "id :: {} Recevied Write Data command for {} file from {}",
+                    id, file_path, peer_id
+                );
+                self.file_handler.write_random(file_path, offset, &data).await.unwrap();
+            },
         }
         Ok(())
     }

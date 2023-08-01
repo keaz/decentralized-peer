@@ -7,7 +7,7 @@ use std::{
 use async_std::task;
 use clap::Parser;
 use decen_peer::{
-    broker_loop, cmd::CmdArgs, get_available_port, io::{watch::async_watch, file_handler::FileHandler},
+    Broker, cmd::CmdArgs, get_available_port, io::{watch::async_watch, file_handler::FileHandler},
     rendezvous::Server, server::PeerServer, peer::client::ClientConnectionHandler, PeerMessageHandler,
 };
 use futures::channel::mpsc;
@@ -45,8 +45,8 @@ fn main() {
     let server_handler =  peer_server.accept_loop(accept_address.as_str(), broker_sender.clone());
     
     let file_watch_handler = async_watch(path, broker_sender.clone());
-
-    let broker_handle = broker_loop(broker_receiver);
+    let broker = Broker::new(peer_id.clone());
+    let broker_handle = broker.broker_loop(broker_receiver);
     let joined_futures = futures::future::join4(
         rendezvous_server_connection_hander,
         server_handler,

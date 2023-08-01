@@ -34,6 +34,23 @@ pub enum Command {
         peer_id: String,
         folder_path: String,
     },
+    ModifyFile {
+        id: Uuid,
+        peer_id: String,
+        file_path: String,
+    },
+    DataRequestCommand {
+        id: Uuid,
+        peer_id: String,
+        file_path: String,
+    },
+    WriteDataCommand {
+        id: Uuid,
+        peer_id: String,
+        file_path: String,
+        offset: u64,
+        data: Vec<u8>,
+    },
     Test {
         id: Uuid,
         peer_id: String,
