@@ -12,7 +12,7 @@ use uuid::Uuid;
 use crate::peer::PeerMessage;
 
 use super::peer::Command;
-use crate::{PeerMessageHandler, spawn_and_log_error, Message, Result, Sender};
+use crate::{PeerMessageHandler, InternalMessage, Result, Sender};
 
 pub struct PeerServer {
     peer_message_hander: Rc<PeerMessageHandler>,
@@ -26,7 +26,7 @@ impl PeerServer {
 
 impl PeerServer {
     
-    pub async fn accept_loop(self,addr: impl ToSocketAddrs, broker_sender: Sender<Message>) -> Result<()> {
+    pub async fn accept_loop(self,addr: impl ToSocketAddrs, broker_sender: Sender<InternalMessage>) -> Result<()> {
         info!("Start accepting incomming connections");
         let listener = TcpListener::bind(addr).await?;
         let mut incoming = listener.incoming();
@@ -41,7 +41,7 @@ impl PeerServer {
         Ok(())
     }
     
-    async fn connection_loop(peer_server: Arc<PeerServer>,broker: Sender<Message>, stream: TcpStream) -> Result<()> {
+    async fn connection_loop(peer_server: Arc<PeerServer>,broker: Sender<InternalMessage>, stream: TcpStream) -> Result<()> {
         let stream = Arc::new(stream);
         let addr = stream.peer_addr();
         let reader = BufReader::new(&*stream);
@@ -62,7 +62,7 @@ impl PeerServer {
         debug!("Receive new ConnectClient id :{:?} peer:{:}", id, client_id);
         let mut connection_broker = broker.clone();
         connection_broker
-            .send(Message::NewPeer {
+            .send(InternalMessage::NewPeer {
                 id,
                 peer_id: client_id.clone(),
                 address: addr,
@@ -77,7 +77,7 @@ impl PeerServer {
         peer_server.accept_new_messages(lines, client_id.clone(), error_threshold, broker).await?;
     
         connection_broker
-            .send(Message::LeavePeer {
+            .send(InternalMessage::LeavePeer {
                 id: Uuid::new_v4(),
                 peer_id: client_id.clone(),
             })
@@ -90,7 +90,7 @@ impl PeerServer {
         mut lines: async_std::io::Lines<BufReader<&TcpStream>>,
         client_id: String,
         error_threshold: i32,
-        mut broker: Sender<Message>,
+        mut broker: Sender<InternalMessage>,
     ) -> Result<()> {
         let mut error_count = 0;
         Ok(while let Some(line) = lines.next().await {

@@ -7,14 +7,14 @@ use std::{
 use async_std::task;
 use clap::Parser;
 use decen_peer::{
-    Broker, cmd::CmdArgs, get_available_port, io::{watch::async_watch, file_handler::FileHandler},
+    broker::Broker, cmd::CmdArgs, get_available_port, io::{watch::async_watch, file_handler::FileHandler},
     rendezvous::Server, server::PeerServer, peer::client::ClientConnectionHandler, PeerMessageHandler,
 };
 use futures::channel::mpsc;
-use rsa::{Pkcs1v15Encrypt, PublicKey, RsaPrivateKey, RsaPublicKey};
+
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
+    let _args: Vec<String> = env::args().collect();
     log4rs::init_file("config/log4rs.yaml", Default::default()).unwrap();
     let cmds = CmdArgs::parse_from(env::args_os());
     let (broker_sender, broker_receiver) = mpsc::unbounded();
@@ -27,8 +27,7 @@ fn main() {
     let folder = cmds.folder.clone();
     let path = Path::new(folder.as_str());
 
-    let file_handler = FileHandler::new(cmds.folder);
-    let peer_message_hander = Rc::new(PeerMessageHandler::new(file_handler));
+    let peer_message_hander = Rc::new(PeerMessageHandler::new());
     
     let client_handler = ClientConnectionHandler::new(peer_message_hander.clone());
     let server = Server::new(client_handler);
@@ -45,7 +44,8 @@ fn main() {
     let server_handler =  peer_server.accept_loop(accept_address.as_str(), broker_sender.clone());
     
     let file_watch_handler = async_watch(path, broker_sender.clone());
-    let broker = Broker::new(peer_id.clone());
+    let file_handler = FileHandler::new(cmds.folder);
+    let broker = Broker::new(peer_id.clone(),file_handler);
     let broker_handle = broker.broker_loop(broker_receiver);
     let joined_futures = futures::future::join4(
         rendezvous_server_connection_hander,

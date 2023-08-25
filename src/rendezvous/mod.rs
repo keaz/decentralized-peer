@@ -12,7 +12,7 @@ use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{peer::client::ClientConnectionHandler, spawn_and_log_error, Message, Result, Sender};
+use crate::{peer::client::ClientConnectionHandler, InternalMessage, Result, Sender};
 
 #[derive(Serialize, Deserialize)]
 pub enum ClientCommand {
@@ -64,7 +64,7 @@ impl Server {
         &self,
         addr: impl ToSocketAddrs,
         client_id: &String,
-        mut broker_sender: Sender<Message>,
+        mut broker_sender: Sender<InternalMessage>,
         available_port: i32,
     ) -> Result<()> {
         let stream = TcpStream::connect(addr).await?;
@@ -105,7 +105,7 @@ impl Server {
                                     },
                                     ClientEvent::ClientLeft{id,client_id} => {
                                         info!("Received peer leave event for peer: {}",client_id);
-                                        let peer_leave_message = Message::LeavePeer{id: id.clone(),peer_id:client_id};
+                                        let peer_leave_message = InternalMessage::LeavePeer{id: id.clone(),peer_id:client_id};
                                         broker_sender.send(peer_leave_message).await.unwrap();
                                     },
                                 }

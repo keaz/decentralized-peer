@@ -4,7 +4,7 @@ use log::{debug, error, info, warn};
 use notify::{Config, Error, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use uuid::Uuid;
 
-use crate::{io::sha, Message, Result, Sender};
+use crate::{io::sha, InternalMessage, Result, Sender, broker::InternalToExternal};
 use futures::{
     channel::mpsc::{channel, Receiver},
     SinkExt, StreamExt,
@@ -13,7 +13,7 @@ use futures::{
 
 
 
-pub async fn async_watch(path: &Path, mut sender: Sender<Message>) -> Result<()> {
+pub async fn async_watch(path: &Path, mut sender: Sender<InternalMessage>) -> Result<()> {
     let (mut watcher, mut rx) = async_watcher()?;
 
     watcher.watch(path, RecursiveMode::Recursive)?;
@@ -45,7 +45,7 @@ fn async_watcher() -> notify::Result<(RecommendedWatcher, Receiver<notify::Resul
 
 async fn handle_event(
     event: Event,
-    sender: &mut Sender<Message>,
+    sender: &mut Sender<InternalMessage>,
     absolute_root: &Path,
 ) -> Result<()> {
     let event_id = Uuid::new_v4();
@@ -68,47 +68,50 @@ async fn handle_event(
                 let path = event.paths.get(0).unwrap();
 
                 let relative_path = get_relative_path(absolute_root, path).to_str().unwrap();
-                let message = Message::FileCreated {
+                
+                let message = InternalToExternal::FileCreated {
                     id: event_id,
                     file: String::from(relative_path),
                     sha,
                 };
-                sender.send(message).await?;
+                sender.send(InternalMessage::InternalToExternal { message }).await?;
             }
             notify::event::CreateKind::Folder => {
                 let relative_path = get_relative_path(absolute_root, event.paths.get(0).unwrap())
                     .to_str()
                     .unwrap();
-                let message = Message::FolderCreated {
+                let message = InternalToExternal::FolderCreated {
                     id: event_id,
                     folder: String::from(relative_path),
                     sha,
                 };
-                sender.send(message).await?;
+                sender.send(InternalMessage::InternalToExternal { message }).await?;
             }
             notify::event::CreateKind::Other => todo!(),
             notify::event::CreateKind::Any => todo!(),
         },
         notify::EventKind::Modify(kind) => match kind {
-            notify::event::ModifyKind::Data(data) => {
+            notify::event::ModifyKind::Data(_data) => {
                 let relative_path = get_relative_path(absolute_root, event.paths.get(0).unwrap())
                     .to_str()
                     .unwrap();
-                let message = Message::FileModified {
+                let message = InternalToExternal::FileModified {
                     id: event_id,
                     file: String::from(relative_path),
                     sha,
                 };
-                sender.send(message).await?;
+                sender.send(InternalMessage::InternalToExternal { message }).await?;
             }
-            notify::event::ModifyKind::Name(name) => {
-                let path = event.paths.get(0).unwrap();
-                let relative_path = get_relative_path(absolute_root, event.paths.get(0).unwrap())
+            notify::event::ModifyKind::Name(_name) => {
+                let _path = event.paths.get(0).unwrap();
+                let _relative_path = get_relative_path(absolute_root, event.paths.get(0).unwrap())
                     .to_str()
                     .unwrap();
             }
-            notify::event::ModifyKind::Other | notify::event::ModifyKind::Any => todo!(),
-            notify::event::ModifyKind::Metadata(metadata) => {
+            notify::event::ModifyKind::Other | notify::event::ModifyKind::Any => {
+                debug!("TODO ignore update for now {:?}",path);
+            },
+            notify::event::ModifyKind::Metadata(_metadata) => {
                 debug!("TODO ignore update for now {:?}",path);
             },
         },

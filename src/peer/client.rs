@@ -1,6 +1,6 @@
 extern crate async_std;
 extern crate futures;
-use crate::{PeerMessageHandler, Message, Result, Sender};
+use crate::{PeerMessageHandler, InternalMessage, Result, Sender};
 use crate::{peer::Command, peer::PeerMessage};
 use async_std::{
     io::{stdin, BufReader},
@@ -32,7 +32,7 @@ impl ClientConnectionHandler {
     pub async fn client_connection(
         &self,
         addr: impl ToSocketAddrs,
-        mut broker_sender: Sender<Message>,
+        mut broker_sender: Sender<InternalMessage>,
     ) -> Result<()> {
         let start = SystemTime::now();
         let since_the_epoch = start
@@ -60,7 +60,7 @@ impl ClientConnectionHandler {
         writer.write_all(b"\n").await?;
     
         broker_sender
-            .send(Message::NewPeer {
+            .send(InternalMessage::NewPeer {
                 id: Uuid::new_v4(),
                 peer_id: peer_id.clone(),
                 address: String::from("123"),
